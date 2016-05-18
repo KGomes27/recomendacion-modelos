@@ -5,3 +5,6 @@ Una introducción al análisis de curvas ROC. Tomar en cuenta solamente las prim
 
 ### Archivos csv
 Referentes a la primer parte de la tarea sobre el sistema de recomendación.
+
+##Paquetes utilizados
+arules y stringdist

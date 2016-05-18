@@ -1,0 +1,340 @@
+---
+title: "Tarea4"
+author: "Karina De Sousa"
+date: "8 de mayo de 2016"
+output: pdf_document
+---
+
+```{r warning=FALSE, echo=FALSE, message=FALSE}
+##Cargar paquetes
+
+install = function(pkg){
+  # Si ya est\'a instalado, no lo instala.
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg, repos = "http:/cran.rstudio.com", dependencies = TRUE)
+    if (!require(pkg, character.only = TRUE)) stop(paste("load failure:", pkg))
+  }
+}
+
+packages <- c("arules", "stringdist");
+for (i in packages){
+  install(i)
+}
+
+(.packages())
+```
+
+#Sistema de recomendaci&oacute;n
+
+Un importante peri&oacute;dico le entrega a usted un dataset limpio con informaci&oacute;n acerca del acceso a su portal web. El mismo contiene **131300** posibles transacciones en un tiempo determinado. Se sabe que el portal ofrece **9 tipos de contenidos y nos ofrecen solo informaci?n de 9 art&iacute;culos**. Los contenidos son:
+
+- Deportes
+- Politica
+- Variedades
+- Internacional
+- Nacionales
+- Sucesos
+- Comunidad
+- Negocios
+- Opini&oacute;n
+
+El peri&oacute;dico tiene sospechas de que existen bots que est&aacute;n ganando dinero al hacer clicks en art&iacute;culos con promociones. En consecuencia, le piden a usted que realice un an&aacute;lisis exploratorio sobre las transacciones para determinar el n&uacute;mero de posibles transacciones bot que tienen en su dataset (**ellos aceptan que si una persona ve un art&iacute;culo m&aacute;s de 20 segundos entonces no es un bot**). Aunado a esto, tienen una lista de demandas que debe suplir usted, el experto.
+
+##Transacciones Bot
+
+1. Modificar su dataset de tal manera que no se lean los identificadores de los art&iacute;culos como **itemN** sino por su tipo de contenido **contenido/articuloN**. Ejemplo: {item1, item10, item81} es la transacci&oacute;n {deportes/articulo1, politica/articulo1, opinion/articulo9}.
+
+```{r warning=FALSE, message=FALSE, prompt=TRUE, tidy=TRUE}
+#Set Working directory
+
+transactions = read.csv(file = "./periodico.csv", header = TRUE, sep = ",")
+
+#transactions <- subset(transactions, select = -c(X) )
+```
+
+* Creamos la funci&oacute;n **createItemString**, que dada una lista de items retorna el string de la forma **contenido/articuloN**,
+
+```{r warning=FALSE, message=FALSE, prompt=TRUE, tidy=TRUE}
+#1-9 Deportes - 1 
+#10-18 Politica - 2
+#19-27 Variedades - 3
+#28-36 Internacional - 4
+#37-45 Nacionales - 5
+#46-54 Sucesos - 6
+#55-63 Comunidad - 7
+#64-72 Negocios - 8
+#73-81 Opinion - 9
+
+createItemString = function(items) {
+  items = unlist(items)
+  finalItem = ""
+  for (i in 1:length(items)) {
+    #Obtenemos el numero de contenido al que pertenece el item
+    content = as.integer(items[i] / 9)
+    if (items[i] %% 9 != 0) {
+      content = content + 1
+      #Obtenemos el numero del articulo
+      n = items[i] %% 9
+    } else {
+      #Si es el ultimo articulo del contenido
+      n = 9
+    }
+    
+    #Seleccionamos el contenido
+    if (content == 1) {
+      str = paste("deportes/articulo", n, sep = "")
+    } else if (content == 2) {
+      str = paste("politica/articulo", n, sep = "")
+    } else if (content == 3) {
+      str = paste("variedades/articulo", n, sep = "")
+    } else if (content == 4) {
+      str = paste("internacional/articulo", n, sep = "")
+    } else if (content == 5) {
+      str = paste("nacionales/articulo", n, sep = "")
+    } else if (content == 6) {
+      str = paste("sucesos/articulo", n, sep = "")
+    } else if (content == 7) {
+      str = paste("comunidad/articulo", n, sep = "")
+    } else if (content == 8) {
+      str = paste("negocios/articulo", n, sep = "")
+    } else if (content == 9) {
+      str = paste("opinion/articulo", n, sep = "")
+    }
+    
+    if (i == 1) {
+      finalItem = paste(finalItem, str, sep = "")
+    } else {
+      finalItem = paste(finalItem, str, sep = ",")
+    }
+  }
+  finalItem
+}
+```
+
+* Creamos la nueva columna del dataset,
+
+```{r warning=FALSE, message=FALSE, prompt=TRUE, tidy=TRUE}
+#Obtenemos los numeros de cada item
+itemsList = lapply(transactions$articles, function(article)
+          unique(na.omit(as.numeric(unlist(strsplit(as.character(article), "[^0-9]+")))))
+        )
+
+final = c(1:length(itemsList))
+
+final = sapply(itemsList, createItemString)
+
+head(final)
+
+#Agregamos la nueva columna
+transactions = data.frame(transactions, final)
+
+#Cambiamos el nombre de la cabecera
+names(transactions) = c("X","ID","entry","exit","items","articles")
+
+head(transactions)
+```
+
+* Ahora, veamos cuanto tarda cada transacci&oacute;n. Sabemos que aquellas que duren menos de 20 seg son consideradas bots. 
+
+```{r warning=FALSE, message=FALSE, prompt=TRUE, tidy=TRUE}
+diffTimes = c(1:length(transactions$entry))
+diff = 0
+
+for (i in 1:length(transactions$entry)) {
+  #Convertir a Date
+  #Obtener seg entre entry y exit
+  diff = strptime(transactions$exit[i], "%Y-%m-%d %H:%M:%S", tz="GMT") - strptime(transactions$entry[i], "%Y-%m-%d %H:%M:%S", tz="GMT")
+
+  #Convertir a numeric
+  diff = as.numeric(diff, units="secs")
+  diffTimes[i] = diff
+}
+
+times = data.frame(transactions, diffTimes)
+names(times) = c("X","ID","entry","exit","items","articles", "diff")
+
+head(times)
+```
+
+El dataframe **times** contiene el tiempo que dura cada transacci&oacute;n y una fila __bot__ donde se indica si la misma es un bot o no. De esta forma, la cantidad de transacciones bot es,
+
+```{r warning=FALSE, message=FALSE, prompt=TRUE, tidy=TRUE}
+bots = diffTimes[diffTimes <= 20]
+length(bots)
+
+nobots = times[times$diff > 20,]
+head(nobots)
+```
+
+##Tipos de usuarios
+
+Sabemos que, 
+
+* El valor de **soporte** de X (un set de elementos - antecedente) con respecto a T (un conjunto de transacciones) se define como la proporci&oacute;n de transacciones en el dataset que con contienen a X. 
+
+* La confianza de una regla X => Y, con respecto a T, es la proporci&oacute;n de transacciones que contienen X y adem&aacute;s contienen a Y. 
+
+Partiendo de estos dos puntos, sabemos que a medida que aumente la confianza, la cantidad de reglas ser&aacute; menor. Por eso, elegimos un valor medio de confianza. Con respecto al soporte, vemos que debe ser bajo para obtener reglas y el m&iacute;nimo valor permitido por __apriori__ sin obtener algu&uacute;n warning es 0.00002.
+
+```{r warning=FALSE, message=FALSE, prompt=TRUE, tidy=TRUE}
+#final es la lista con los articulos 
+write(final, file = "transactions")
+
+#Leemos las transacciones
+transactionsRules = read.transactions("transactions", format="basket", sep=",")
+
+#Borrar archivo generado por write
+unlink("transactions")
+
+summary(transactionsRules)
+
+itemFrequencyPlot(transactionsRules)
+
+rules <- apriori(transactionsRules, parameter = list(supp = 0.00002, conf = 0.5))
+```
+
+2. Conocer los tipos de usuarios que ingresan a su p&aacute;gina (ellos creen que son 8 tipos de usuarios) y tratar de determinar la proporci&oacute;n de cada tipo de usuario.
+
+```{r warning=FALSE, message=FALSE, prompt=TRUE, tidy=TRUE}
+rhs = inspect(unique(rules@rhs))
+class(rhs$items)
+
+d <- stringdistmatrix(rhs$items)
+usersClusters = hclust(d, method = "complete")
+plot(usersClusters)
+
+nclases = 9
+#Cortamos
+corte = cutree(usersClusters, k=nclases)
+
+plot(as.numeric(rhs$items),
+      c(1:74),
+      col = corte,
+      xlab = "rhs",
+      ylab = "ID",
+      main = "Tipos de usuarios - hclust complete")
+
+typesUsers = data.frame(as.character(rhs$items), as.numeric(rhs$items), corte)
+names(typesUsers) = c("items", "ID", "class")
+head(typesUsers)
+```
+
+3. Dado un usuario nuevo que haya ingresado a n art&iacute;culos (n variable), poder recomendar un art&iacute;culo n+1 y as&iacute; aumentar el compromiso del cliente con su portal web. Como usted sabe, para poder calcular las reglas necesita como entrada **MinSupport** y **MinConfianza**. Sin embargo, el cliente desconoce cu&aacute;les son estos valores en consecuencia es tarea de usted determinar y justificar los mismos de acuerdo a su criterio.
+
+Vemos la matriz de transacciones y las reglas creadas usando __apriori__,
+
+```{r warning=FALSE, message=FALSE, prompt=TRUE, tidy=TRUE}
+summary(rules)
+```
+
+Para hacer la recomendaci&oacute;n al usuario se ha creado una funci&oacute;n, que dada una lista de n art&acute;los visitados retorna las recomendaciones por orden de confianza y el art&iacute;lo que posee la mayor confianza. 
+
+```{r warning=FALSE, message=FALSE, prompt=TRUE, tidy=TRUE}
+testFunction = c("deportes/articulo1", "deportes/articulo3", "deportes/articulo4", "deportes/articulo7", 
+                 "deportes/articulo8", "deportes/articulo9")
+
+recomendation = function(articlesVisited) {
+  subRules = subset(rules, subset = lhs %ain% articlesVisited)
+  sortedConf = sort(subRules, by="confidence", decreasing = TRUE)
+  inspect(head(sortedConf))
+  recom = inspect(unique(sortedConf@rhs))
+  recom[1,1]
+}
+
+result = recomendation(testFunction)
+result
+```
+
+4. Conocer las 10 visitas con mayor tiempo de estad&iacute;a en la p&aacute;gina y las 10 visitas con menor tiempo de estad&iacute;a en la p&aacute;gina.
+
+El dataframe **times** contiene el tiempo que dura cada transacci&oacute;n, hacemos un **sort** y obtenemos las transacciones con mayor tiempo de estad&iacute;a en la p&aacute;gina,
+
+```{r warning=FALSE, message=FALSE, prompt=TRUE, tidy=TRUE}
+sortTimes = nobots[with(nobots, order(-nobots$diff)),]
+sortTimes[1:10,1:7]
+```
+
+Ahora, obtenemos las transacciones con menor tiempo de estad&iacute;a en la p&aacute;gina
+
+```{r warning=FALSE, message=FALSE, prompt=TRUE, tidy=TRUE}
+lengthDF = length(nobots$ID)
+sortTimes[(lengthDF - 10):lengthDF,1:7]
+```
+
+5. Conocer las 10 transacciones con mayor n&uacute;mero de apariciones en el dataset.
+
+```{r warning=FALSE, message=FALSE, prompt=TRUE, tidy=TRUE}
+# Create an item frequency plot for the top 10 items
+itemFrequencyPlot(transactionsRules, topN=10, type="absolute")
+
+topTenItems = c(sort(itemFrequency(transactionsRules),decreasing = T)[1:10])
+topTenItems
+```
+
+***
+
+#Curvas ROC
+
+1. Los scores por instancia (no necesariamente ordenados).
+
+2. La verdadera clase de las instancias.
+
+3. La clase target. En el caso de que nclass > 2 entonces haga un enfoque __1 vs all__.
+
+```{r warning=FALSE, message=FALSE, prompt=TRUE, tidy=TRUE}
+generate_ROC = function(scores, real, target) {
+  labels = c(Inf, scores, 1) #For plot
+  scores = sort(scores, decreasing = FALSE)
+  Fprev = Inf #previous score
+  FP = 0 #Number of False Positives
+  TP = 0 #Number of True Positives
+  realP = real[real == target] #Target class in real array
+  P = length(realP) #Number of positives
+  N = length(real) - P #Number of negatives
+  j = 1 #aux index
+  arr_FP = c() #Array of False Positives - X axis of ROC curve
+  arr_TP = c() #Array of True Positives - Y axis of ROC curve
+  
+  for(i in 1:length(scores)) {
+    if (scores[i] != Fprev){ #If it's a different score
+      arr_FP[j] = FP/N
+      arr_TP[j] = TP/P
+      Fprev = scores[i]
+      j = j + 1
+    } 
+    
+    if (real[i] == target) { #i is a positive example
+      TP = TP + 1
+    }else { #i is a negative example
+      FP = FP + 1
+    }
+  }
+  
+  #Last point in ROC curve - This is (1,1)
+  arr_FP[j] = FP/N
+  arr_TP[j] = TP/P
+  
+  plot(arr_FP, arr_TP, 
+       type = "b", #points joined by lines
+       main = "ROC Curve",
+       xlab = "FP-Rate", 
+       ylab = "TP-Rate", 
+       col = "blue")
+  abline(0, 1)
+  points(arr_FP, arr_TP, col = 2, pch = 20)
+  
+  labels = labels[!duplicated(labels)] #Remove duplicated scores
+  text(arr_FP, arr_TP, labels, cex= 0.7, pos=4)
+}
+
+#TESTING FUNCTION
+scores = c(0.9, 0.8, 0.7, 0.6, 0.55, 0.54, 0.53, 0.52, 0.5, 0.5, 0.5, 0.5, 0.38, 0.37, 0.36, 0.35, 0.34, 0.33, 0.30, 0.1)
+
+real = c(2, 2, 1, 2, 2, 2, 2, 1, 2, 1, 2, 1, 2, 1, 1, 1, 2, 1, 1, 1)
+
+target = 2
+
+generate_ROC(scores, real, target)
+```
+
+
